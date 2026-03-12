@@ -5,16 +5,15 @@ import batalla_pb2
 import batalla_pb2_grpc
 
 # --- 1. CONFIGURACIÓN DE CONEXIÓN A RAILWAY ---
-# Usamos el puerto 443 y credenciales SSL porque Railway es seguro por defecto
-# app_web.py
+# Pega aquí exactamente el enlace de TCP Proxy que te dio Railway
+# Ejemplo: 'roundhouse.proxy.rlwy.net:45821'
 URL_RAILWAY = 'crossover.proxy.rlwy.net:49586' 
 
 @st.cache_resource
 def obtener_stub():
-    # Usamos insecure_channel porque el túnel TCP ya es directo
+    # Usamos insecure_channel porque el túnel TCP ya es directo y no usa SSL
     canal = grpc.insecure_channel(URL_RAILWAY)
     return batalla_pb2_grpc.MotorMultijugadorStub(canal)
-
 
 stub = obtener_stub()
 
@@ -60,8 +59,9 @@ elif st.session_state.fase == "ESPERANDO_JUGADORES":
         st.session_state.fase = "POSICIONAMIENTO"
         st.rerun()
     else:
-        if st.button("Actualizar 🔄"):
-            st.rerun()
+        # Recarga automática mientras esperamos
+        time.sleep(2)
+        st.rerun()
 
 # FASE 3: POSICIONAMIENTO
 elif st.session_state.fase == "POSICIONAMIENTO":
@@ -95,9 +95,10 @@ elif st.session_state.fase == "ESPERANDO_LISTOS":
         st.session_state.fase = "COMBATE"
         st.rerun()
     else:
-        st.warning("Tus barcos están listos. Esperando a los enemigos...")
-        if st.button("Actualizar Estado 🔄"):
-            st.rerun()
+        st.warning("Tus barcos están listos. Esperando a que los enemigos terminen de acomodar su flota...")
+        # Recarga automática mientras esperamos
+        time.sleep(2)
+        st.rerun()
 
 # FASE 5: COMBATE
 elif st.session_state.fase == "COMBATE":
@@ -169,7 +170,11 @@ elif st.session_state.fase == "COMBATE":
                             else:
                                 st.button("🌊", key=f"atk_{x}_{y}", disabled=True)
         
-        # Botón para ir viendo qué hace el enemigo
         st.write("---")
-        if st.button("Refrescar Pantalla 🔄", use_container_width=True):
-            st.rerun()
+        # --- RECARGA AUTOMÁTICA INTELIGENTE ---
+        # Solo recargamos automáticamente si NO es tu turno. 
+        # Si es tu turno, la pantalla se queda quieta para dejarte apuntar.
+        if turno != st.session_state.mi_id:
+            with st.spinner("Esperando el movimiento del enemigo..."):
+                time.sleep(2)
+                st.rerun()
