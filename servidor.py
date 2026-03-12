@@ -3,7 +3,6 @@ from concurrent import futures
 import time
 import batalla_pb2
 import batalla_pb2_grpc
-import os
 
 class MotorMultijugadorServicer(batalla_pb2_grpc.MotorMultijugadorServicer):
     def __init__(self):
@@ -22,7 +21,6 @@ class MotorMultijugadorServicer(batalla_pb2_grpc.MotorMultijugadorServicer):
     def RegistrarJugador(self, request, context):
         if self.max_jugadores == 0:
             self.max_jugadores = request.total_esperados
-            # ¡Redujimos el mapa a * 3!
             tamano_cuadricula = self.max_jugadores * 3 
             self.matriz_disparos = [[0 for _ in range(tamano_cuadricula)] for _ in range(tamano_cuadricula)]
         
@@ -30,7 +28,7 @@ class MotorMultijugadorServicer(batalla_pb2_grpc.MotorMultijugadorServicer):
         id_jugador = self.jugadores_conectados
         
         self.flotas[id_jugador] = []
-        self.vidas[id_jugador] = 10  # ¡Subimos a 10 barcos!
+        self.vidas[id_jugador] = 10
         self.puntajes[id_jugador] = 0
         self.jugadores_vivos += 1
         
@@ -77,11 +75,9 @@ class MotorMultijugadorServicer(batalla_pb2_grpc.MotorMultijugadorServicer):
         if idJugador != self.turno_actual or self.jugadores_vivos <= 1:
             return batalla_pb2.RespuestaEntero(valor=8) 
 
-        # ¡Ya no bloqueamos la casilla! Todos pueden disparar donde sea.
         impacto = False
         ids_impactados = ""
 
-        # Revisamos todas las flotas para ver a quién le damos
         for enemigo_id, barcos in self.flotas.items():
             if enemigo_id != idJugador and (x, y) in barcos:
                 barcos.remove((x, y)) 
@@ -94,7 +90,6 @@ class MotorMultijugadorServicer(batalla_pb2_grpc.MotorMultijugadorServicer):
                 if self.vidas[enemigo_id] == 0:
                     self.jugadores_vivos -= 1
 
-        # Lógica del radar público gRPC
         if impacto:
             valor_anterior = self.matriz_disparos[x][y]
             if valor_anterior > 0:
@@ -139,13 +134,14 @@ class MotorMultijugadorServicer(batalla_pb2_grpc.MotorMultijugadorServicer):
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     batalla_pb2_grpc.add_MotorMultijugadorServicer_to_server(MotorMultijugadorServicer(), server)
-
-    puerto = os.environ.get("PORT", "10000") 
+    
+    # ¡Fijamos el 10000 a la fuerza para que el TCP Proxy no se corte!
+    puerto = "10000"
     server.add_insecure_port(f'[::]:{puerto}')
-
+    
     server.start()
-    print("Servidor gRPC listo y a la escucha en el puerto 10000. Los barcos ahora son secretos.")
+    print(f"Servidor gRPC listo y a la escucha en el puerto {puerto}.")
     server.wait_for_termination()
 
 if __name__ == '__main__':
-    serve() 
+    serve()
