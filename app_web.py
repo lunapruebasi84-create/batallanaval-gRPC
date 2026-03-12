@@ -153,6 +153,34 @@ elif st.session_state.fase == "COMBATE":
                 for y in range(tamano):
                     valor = respuesta_tablero.filas[x].valores[y]
                     with cols_atk[y]:
+                        
+                        # 1. Elegimos qué ícono mostrar según el historial de la casilla
+                        if valor == -1:
+                            icono = "💧" # Alguien falló aquí antes
+                        elif valor > 0:
+                            icono = "💥" # Alguien acertó aquí antes
+                        else:
+                            icono = "🌊" # Agua sin explorar
+
+                        # 2. Si es TU turno, TODOS los botones están activos para que dispares donde quieras
+                        if turno == st.session_state.mi_id:
+                            if st.button(icono, key=f"atk_{x}_{y}"):
+                                peticion = batalla_pb2.PeticionCoordenada(id_jugador=st.session_state.mi_id, x=x, y=y)
+                                res_disparo = stub.Disparar(peticion).valor
+                                
+                                if res_disparo == 8:
+                                    st.error("Movimiento inválido.")
+                                st.rerun()
+                        
+                        # 3. Si NO es tu turno, los bloqueamos solo para que no des clics por accidente
+                        else:
+                            st.button(icono, key=f"atk_{x}_{y}", disabled=True)
+            st.markdown("**Radar (Ataque)**")
+            for x in range(tamano):
+                cols_atk = st.columns(tamano)
+                for y in range(tamano):
+                    valor = respuesta_tablero.filas[x].valores[y]
+                    with cols_atk[y]:
                         # Si ya se disparó ahí, mostramos el resultado
                         if valor == -1:
                             st.button("💧", key=f"atk_{x}_{y}", disabled=True) # Fallo
