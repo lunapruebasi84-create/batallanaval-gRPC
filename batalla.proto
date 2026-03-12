@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+// El nombre del paquete (como tu antiguo module Juego)
+package batalla;
+
+// --- DEFINICIÓN DE MENSAJES ---
+// (Estas son las "cajas" donde empacamos los datos para enviarlos)
+
+// Un mensaje vacío para cuando no necesitamos enviar nada
+message Vacio {}
+
+// Respuestas simples
+message RespuestaEntero {
+    int32 valor = 1;
+}
+
+message RespuestaBooleano {
+    bool valor = 1;
+}
+
+message RespuestaMarcador {
+    string texto = 1;
+}
+
+// Mensajes con datos específicos
+message PeticionRegistro {
+    int32 total_esperados = 1;
+}
+
+message RespuestaRegistro {
+    int32 id_jugador = 1;
+}
+
+message PeticionJugador {
+    int32 id_jugador = 1;
+}
+
+message PeticionCoordenada {
+    int32 id_jugador = 1;
+    int32 x = 2;
+    int32 y = 3;
+}
+
+// Para la matriz del tablero
+message Fila {
+    repeated int32 valores = 1; // "repeated" significa que es una lista
+}
+
+message RespuestaTablero {
+    repeated Fila filas = 1;
+}
+
+// --- DEFINICIÓN DEL SERVICIO ---
+// (Aquí están tus funciones, adaptadas para usar los mensajes de arriba)
+service MotorMultijugador {
+    rpc RegistrarJugador (PeticionRegistro) returns (RespuestaRegistro);
+    rpc ObtenerCantidadConectados (Vacio) returns (RespuestaEntero);
+    rpc ObtenerMaxJugadores (Vacio) returns (RespuestaEntero);
+    rpc ColocarBarco (PeticionCoordenada) returns (Vacio);
+    rpc DeclararListo (PeticionJugador) returns (Vacio);
+    rpc TodosListos (Vacio) returns (RespuestaBooleano);
+    
+    rpc DeQuienEsElTurno (Vacio) returns (RespuestaEntero);
+    rpc Disparar (PeticionCoordenada) returns (RespuestaEntero);
+    
+    rpc ObtenerEstadoTablero (Vacio) returns (RespuestaTablero);
+    rpc ObtenerGanador (Vacio) returns (RespuestaEntero);
+    rpc ObtenerMarcador (Vacio) returns (RespuestaMarcador);
+}
