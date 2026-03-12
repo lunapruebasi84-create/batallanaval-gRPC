@@ -4,92 +4,172 @@ import time
 import batalla_pb2
 import batalla_pb2_grpc
 
-# 1. Configuración inicial de la página y el estado de la sesión
-st.set_page_config(page_title="Batalla Naval gRPC", layout="wide")
+# --- 1. CONFIGURACIÓN DE CONEXIÓN A RAILWAY ---
+# Usamos el puerto 443 y credenciales SSL porque Railway es seguro por defecto
+# app_web.py
+URL_RAILWAY = 'crossover.proxy.rlwy.net:49586' 
 
-# Inicializamos las variables que no queremos que se borren al recargar la página
-if 'stub' not in st.session_state:
-    # Para pruebas locales usamos localhost. Luego lo cambiaremos por la URL de Railway.
-    canal = grpc.insecure_channel('localhost:10000') 
-    st.session_state.stub = batalla_pb2_grpc.MotorMultijugadorStub(canal)
+@st.cache_resource
+def obtener_stub():
+    # Usamos insecure_channel porque el túnel TCP ya es directo
+    canal = grpc.insecure_channel(URL_RAILWAY)
+    return batalla_pb2_grpc.MotorMultijugadorStub(canal)
 
-if 'mi_id' not in st.session_state:
-    st.session_state.mi_id = 0
-if 'fase' not in st.session_state:
-    st.session_state.fase = "LOBBY"
-if 'max_jugadores' not in st.session_state:
-    st.session_state.max_jugadores = 0
-if 'mis_coordenadas' not in st.session_state:
-    st.session_state.mis_coordenadas = []
 
-# 2. Funciones de interacción con gRPC
-def registrar_jugador(esperados):
-    peticion = batalla_pb2.PeticionRegistro(total_esperados=esperados)
-    respuesta = st.session_state.stub.RegistrarJugador(peticion)
-    st.session_state.mi_id = respuesta.id_jugador
-    st.session_state.max_jugadores = esperados
-    st.session_state.fase = "ESPERANDO_LOBBY"
-    st.rerun() # Forzamos a que Streamlit recargue la pantalla
+stub = obtener_stub()
 
-def colocar_barco(x, y):
-    if len(st.session_state.mis_coordenadas) < 10:
-        if (x, y) not in st.session_state.mis_coordenadas:
-            peticion = batalla_pb2.PeticionCoordenada(id_jugador=st.session_state.mi_id, x=x, y=y)
-            st.session_state.stub.ColocarBarco(peticion)
-            st.session_state.mis_coordenadas.append((x, y))
-            
-            if len(st.session_state.mis_coordenadas) == 10:
-                # Si ya colocamos 10, declaramos listo
-                st.session_state.stub.DeclararListo(batalla_pb2.PeticionJugador(id_jugador=st.session_state.mi_id))
-                st.session_state.fase = "ESPERANDO_LISTOS"
-            
-            st.rerun()
+# --- 2. VARIABLES DE SESIÓN ---
+# Evita que se borre nuestra info cuando Streamlit recarga la página
+if 'fase' not in st.session_state: st.session_state.fase = "LOBBY"
+if 'mi_id' not in st.session_state: st.session_state.mi_id = 0
+if 'max_jugadores' not in st.session_state: st.session_state.max_jugadores = 0
+if 'barcos_colocados' not in st.session_state: st.session_state.barcos_colocados = []
 
-# 3. Interfaz Visual (Renderizado condicional según la fase)
-st.title("Batalla Naval Royale 🚢")
+# --- 3. INTERFAZ GRÁFICA ---
+st.set_page_config(page_title="Batalla Naval Royale", layout="centered")
+st.title("🚢 Batalla Naval Royale (gRPC)")
 
+# FASE 1: LOBBY
 if st.session_state.fase == "LOBBY":
-    st.subheader("Configuración de la Partida")
-    esperados = st.number_input("¿Cuántos jugadores?", min_value=2, max_value=4, value=2)
-    if st.button("Unirse a la partida"):
-        registrar_jugador(esperados)
-
-elif st.session_state.fase == "ESPERANDO_LOBBY":
-    conectados = st.session_state.stub.ObtenerCantidadConectados(batalla_pb2.Vacio()).valor
-    st.info(f"Eres el jugador {st.session_state.mi_id}. Esperando jugadores... ({conectados}/{st.session_state.max_jugadores})")
+    st.subheader("Unirse a la partida")
+    # Checamos si el servidor ya tiene un máximo de jugadores
+    max_server = stub.ObtenerMaxJugadores(batalla_pb2.Vacio()).valor
     
-    if st.button("Actualizar estado"):
-        if conectados == st.session_state.max_jugadores:
-            st.session_state.fase = "POSICIONAMIENTO"
+    if max_server == 0:
+        esperados = st.number_input("Eres el primero. ¿Cuántos jugadores serán?", min_value=2, max_value=4, value=2)
+    else:
+        esperados = max_server
+        st.info(f"La partida está configurada para {esperados} jugadores.")
+        
+    if st.button("Conectar al Servidor"):
+        peticion = batalla_pb2.PeticionRegistro(total_esperados=esperados)
+        respuesta = stub.RegistrarJugador(peticion)
+        st.session_state.mi_id = respuesta.id_jugador
+        st.session_state.max_jugadores = esperados
+        st.session_state.fase = "ESPERANDO_JUGADORES"
         st.rerun()
 
-elif st.session_state.fase == "POSICIONAMIENTO":
-    st.subheader(f"Jugador {st.session_state.mi_id} | Coloca tus barcos")
-    st.write(f"Barcos colocados: {len(st.session_state.mis_coordenadas)} / 10")
+# FASE 2: ESPERANDO JUGADORES
+elif st.session_state.fase == "ESPERANDO_JUGADORES":
+    conectados = stub.ObtenerCantidadConectados(batalla_pb2.Vacio()).valor
+    st.info(f"Jugador {st.session_state.mi_id}. Esperando a los demás... ({conectados}/{st.session_state.max_jugadores})")
     
-    # Dibujamos una cuadrícula usando columnas de Streamlit
+    if conectados >= st.session_state.max_jugadores:
+        st.success("¡Todos conectados! Iniciando posicionamiento...")
+        time.sleep(2)
+        st.session_state.fase = "POSICIONAMIENTO"
+        st.rerun()
+    else:
+        if st.button("Actualizar 🔄"):
+            st.rerun()
+
+# FASE 3: POSICIONAMIENTO
+elif st.session_state.fase == "POSICIONAMIENTO":
+    st.subheader(f"Jugador {st.session_state.mi_id} | Coloca tus 10 barcos")
+    faltan = 10 - len(st.session_state.barcos_colocados)
+    st.write(f"Barcos restantes: **{faltan}**")
+    
     tamano = st.session_state.max_jugadores * 3
+    
+    # Dibujamos el tablero con botones
     for x in range(tamano):
         cols = st.columns(tamano)
         for y in range(tamano):
             with cols[y]:
-                if (x, y) in st.session_state.mis_coordenadas:
-                    st.button("🚢", key=f"def_{x}_{y}", disabled=True)
+                if (x, y) in st.session_state.barcos_colocados:
+                    st.button("🚢", key=f"btn_{x}_{y}", disabled=True)
                 else:
-                    if st.button("🌊", key=f"def_{x}_{y}"):
-                        colocar_barco(x, y)
+                    if st.button("🌊", key=f"btn_{x}_{y}"):
+                        peticion = batalla_pb2.PeticionCoordenada(id_jugador=st.session_state.mi_id, x=x, y=y)
+                        stub.ColocarBarco(peticion)
+                        st.session_state.barcos_colocados.append((x, y))
+                        
+                        if len(st.session_state.barcos_colocados) == 10:
+                            stub.DeclararListo(batalla_pb2.PeticionJugador(id_jugador=st.session_state.mi_id))
+                            st.session_state.fase = "ESPERANDO_LISTOS"
+                        st.rerun()
 
+# FASE 4: ESPERANDO QUE TODOS ESTÉN LISTOS
 elif st.session_state.fase == "ESPERANDO_LISTOS":
-    todos_listos = st.session_state.stub.TodosListos(batalla_pb2.Vacio()).valor
-    if todos_listos:
+    if stub.TodosListos(batalla_pb2.Vacio()).valor:
         st.session_state.fase = "COMBATE"
         st.rerun()
     else:
-        st.warning("Esperando a que los demás jugadores terminen de acomodar sus barcos...")
-        if st.button("Actualizar estado"):
+        st.warning("Tus barcos están listos. Esperando a los enemigos...")
+        if st.button("Actualizar Estado 🔄"):
             st.rerun()
 
+# FASE 5: COMBATE
 elif st.session_state.fase == "COMBATE":
-    st.subheader("¡Fase de Combate!")
-    # Aquí irá la lógica para mostrar el radar de ataque y pedir el turno
-    st.write("En construcción...")
+    st.subheader("⚔️ FASE DE COMBATE ⚔️")
+    
+    # 1. Checamos si ya hay un ganador
+    ganador = stub.ObtenerGanador(batalla_pb2.Vacio()).valor
+    if ganador > 0:
+        st.success(f"¡EL JUGADOR {ganador} HA GANADO LA PARTIDA!")
+        marcador = stub.ObtenerMarcador(batalla_pb2.Vacio()).texto
+        st.text(marcador)
+        if st.button("Volver a jugar / Reiniciar"):
+            st.session_state.clear()
+            st.rerun()
+    else:
+        # 2. Vemos de quién es el turno
+        turno = stub.DeQuienEsElTurno(batalla_pb2.Vacio()).valor
+        if turno == st.session_state.mi_id:
+            st.warning(f"¡ES TU TURNO JUGADOR {st.session_state.mi_id}! Selecciona una coordenada en el Radar.")
+        else:
+            st.info(f"Turno del Jugador {turno}. Espera a que termine su movimiento...")
+
+        # 3. Traemos el tablero del servidor
+        respuesta_tablero = stub.ObtenerEstadoTablero(batalla_pb2.Vacio())
+        tamano = st.session_state.max_jugadores * 3
+        
+        # 4. Dibujamos dos columnas (Defensa Izquierda, Ataque Derecha)
+        col_defensa, espacio, col_ataque = st.columns([1, 0.2, 1])
+        
+        with col_defensa:
+            st.markdown("**Tu Flota (Defensa)**")
+            for x in range(tamano):
+                cols_def = st.columns(tamano)
+                for y in range(tamano):
+                    valor = respuesta_tablero.filas[x].valores[y]
+                    with cols_def[y]:
+                        if (x, y) in st.session_state.barcos_colocados:
+                            if valor > 0 and str(st.session_state.mi_id) in str(valor):
+                                st.button("💥", key=f"def_{x}_{y}", disabled=True) # Nos dieron
+                            else:
+                                st.button("🚢", key=f"def_{x}_{y}", disabled=True) # Intacto
+                        else:
+                            if valor == -1:
+                                st.button("💧", key=f"def_{x}_{y}", disabled=True) # Fallo enemigo aquí
+                            else:
+                                st.button("🌊", key=f"def_{x}_{y}", disabled=True) # Agua
+
+        with col_ataque:
+            st.markdown("**Radar (Ataque)**")
+            for x in range(tamano):
+                cols_atk = st.columns(tamano)
+                for y in range(tamano):
+                    valor = respuesta_tablero.filas[x].valores[y]
+                    with cols_atk[y]:
+                        # Si ya se disparó ahí, mostramos el resultado
+                        if valor == -1:
+                            st.button("💧", key=f"atk_{x}_{y}", disabled=True) # Fallo
+                        elif valor > 0:
+                            st.button("💥", key=f"atk_{x}_{y}", disabled=True) # Acierto
+                        else:
+                            # Si es agua, habilitamos el botón SOLO si es nuestro turno
+                            if turno == st.session_state.mi_id:
+                                if st.button("🎯", key=f"atk_{x}_{y}"):
+                                    peticion = batalla_pb2.PeticionCoordenada(id_jugador=st.session_state.mi_id, x=x, y=y)
+                                    res_disparo = stub.Disparar(peticion).valor
+                                    if res_disparo == 8:
+                                        st.error("Movimiento inválido.")
+                                    st.rerun() # Recargamos para ver el disparo
+                            else:
+                                st.button("🌊", key=f"atk_{x}_{y}", disabled=True)
+        
+        # Botón para ir viendo qué hace el enemigo
+        st.write("---")
+        if st.button("Refrescar Pantalla 🔄", use_container_width=True):
+            st.rerun()
